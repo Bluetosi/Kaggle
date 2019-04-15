@@ -1,0 +1,21 @@
+ID : 집을 구분하는 번호
+date : 집을 구매한(거래한) 날짜
+price : 집의 가격(Target variable)
+bedrooms : 침실의 수
+bathrooms : 침실 개수 당 화장실의 수(화장실의 수 / 침실의 수 ) 화장실, 세면대, 샤워실, 욕조 : 1 화장실, 세면대, 샤워실, : 0.75 화장실, 세면대, : 0.5
+sqft_living : 주거 공간의 평방 피트(면적) sqft_living = sqft_above + sqftbasement 임.
+sqft_lot : 부지의 평방 피트(면적)
+floors : 집의 층 수 층수에 0.5는 다락방의 의미.
+waterfront : 집의 전방에 강이 흐르는지 유무 (a.k.a. 리버뷰)
+view : 집이 얼마나 좋아 보이는지의 정도 (0~4)
+condition : 집의 전반적인 상태 (1~5)
+grade : King County grading 시스템 기준으로 매긴 집의 등급 (1~13)
+sqft_above : 지하실을 제외한 평방 피트(면적)
+sqft_basement : 지하실의 평방 피트(면적)
+yr_built : 지어진 년도
+yr_renovated : 집을 재건축한 년도
+zipcode : 우편번호
+lat : 위도
+long : 경도
+sqft_living15 : 2015년 기준 주거 공간의 평방 피트(면적, 집을 재건축했다면, 변화가 있을 수 있음) 또는 가장 가까운 주변 15개의 평균 주거 공간의 평방 피트
+sqft_lot15 : 2015년 기준 부지의 평방 피트(면적, 집을 재건축했다면, 변화가 있을 수 있음) 또는 가장 가까운 주변 15개의 부지의 평균 평방 피트
