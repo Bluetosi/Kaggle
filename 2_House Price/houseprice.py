@@ -1,15 +1,16 @@
 import numpy as np
 import pandas as pd
+pd.set_option('display.max_columns', None)
 
-from sklearn.linear_model import RidgeCV, ElasticNetCV
-from sklearn.pipeline import make_pipeline
-from sklearn.preprocessing import RobustScaler
+from sklearn.preprocessing import LabelEncoder
 from sklearn.ensemble import GradientBoostingRegressor
 from sklearn.model_selection import KFold, cross_val_score
 from sklearn.metrics import mean_squared_error
-from sklearn.base import BaseEstimator, TransformerMixin, RegressorMixin, clone
 import xgboost as xgb
 import lightgbm as lgb
+
+import warnings
+warnings.filterwarnings("ignore")
 
 # Origin
 ori_train = pd.read_csv('./Input/train.csv')
@@ -20,79 +21,156 @@ df_train = pd.read_csv('./Input/train.csv')
 df_test = pd.read_csv('./Input/test.csv')
 
 # 이상치 제거
-df_train = df_train.loc[df_train['id']!=456] # grade
-df_train = df_train.loc[df_train['id']!=2777] # grade
-df_train = df_train.loc[df_train['id']!=7259] # grade
-df_train = df_train.loc[df_train['id']!=8990] # sqft_living
-df_train = df_train.loc[df_train['id']!=1231] # living_ratio
-df_train = df_train.loc[df_train['id']!=12209] # living_ratio
-df_train = df_train.loc[df_train['id']!=12781] # living_ratio
+df_train = df_train.loc[df_train['id']!=4123] # grade 3
+df_train = df_train.loc[df_train['id']!=2775] # grade 11
 
-# ID 처리
-df_train.drop('id', axis=1, inplace=True)
-df_test.drop('id', axis=1, inplace=True)
+# ID 제거
+df_train.drop("id", axis=1, inplace=True)
+df_test.drop("id", axis=1, inplace=True)
 
-# 가격 정규화 (np.log1p)
-df_train['price'] = df_train['price'].map(lambda x: np.log1p(x))
+# 거래 년도 (라벨 인코딩)
+df_train['year'] = df_train['date'].apply(lambda x: str(x[0:4])).astype(int)
+df_test['year'] = df_test['date'].apply(lambda x: str(x[0:4])).astype(int)
+le1 = LabelEncoder()
+le1.fit(df_train['year'])
+le1.fit(df_test['year'])
+df_train['year'] = le1.transform(df_train['year'])
+df_test['year'] = le1.transform(df_test['year'])
 
-# 날짜 변경 (년.월.일)
-df_train['date'] = df_train['date'].apply(lambda x: str(x[0:6])).astype(int)
-df_test['date'] = df_test['date'].apply(lambda x: str(x[0:6])).astype(int)
+# 거래 년월 (라벨 인코딩)
+df_train['yearmm'] = df_train['date'].apply(lambda x: str(x[0:6])).astype(int)
+df_test['yearmm'] = df_test['date'].apply(lambda x: str(x[0:6])).astype(int)
+le2 = LabelEncoder()
+le2.fit(df_train['yearmm'])
+le2.fit(df_test['yearmm'])
+df_train['yearmm'] = le2.transform(df_train['yearmm'])
+df_test['yearmm'] = le2.transform(df_test['yearmm'])
 
-# sqft_living 정규화 (np.log1p)
-df_train['sqft_living'] = df_train['sqft_living'].map(lambda x: np.log1p(x))
-df_test['sqft_living'] = df_test['sqft_living'].map(lambda x: np.log1p(x))
+# 거래 날짜
+df_train['date'] = df_train['date'].apply(lambda x: str(x[0:8])).astype(int)
+df_test['date'] = df_test['date'].apply(lambda x: str(x[0:8])).astype(int)
 
-# sqft_lot 정규화 (np.log1p)
-df_train['sqft_lot'] = df_train['sqft_lot'].map(lambda x: np.log1p(x))
-df_test['sqft_lot'] = df_test['sqft_lot'].map(lambda x: np.log1p(x))
+# 우편번호 (라벨 인코딩)
+le3 = LabelEncoder()
+le3.fit(df_train['zipcode'])
+le3.fit(df_test['zipcode'])
+df_train['zipcode'] = le3.transform(df_train['zipcode'])
+df_test['zipcode'] = le3.transform(df_test['zipcode'])
 
-# sqft_above 정규화 (np.log1p)
-df_train['sqft_above'] = df_train['sqft_above'].map(lambda x: np.log1p(x))
-df_test['sqft_above'] = df_test['sqft_above'].map(lambda x: np.log1p(x))
-
-# sqft_basement 정규화 (np.log1p)
-df_train['sqft_basement'] = df_train['sqft_basement'].map(lambda x: np.log1p(x))
-df_test['sqft_basement'] = df_test['sqft_basement'].map(lambda x: np.log1p(x))
-
-# yr_renovated
+# 재건축 여부
 df_train['is_renovated'] = df_train['yr_renovated'].map(lambda x: 1 if x > 0 else 0)
 df_test['is_renovated'] = df_test['yr_renovated'].map(lambda x: 1 if x > 0 else 0)
 
-## 데이터 생성
+# 최신 건축 년도
+df_train['yr_renovated'] = np.maximum(df_train['yr_built'], df_train['yr_renovated'])
+df_test['yr_renovated'] = np.maximum(df_test['yr_built'], df_test['yr_renovated'])
 
 # 방의 총 갯수
 df_train['totalrooms'] = df_train['bedrooms'] + df_train['bathrooms']
 df_test['totalrooms'] = df_test['bedrooms'] + df_test['bathrooms']
 
-# 방 면적 비율
-df_train['sqft_room'] = np.round(df_train['sqft_living']/df_train['totalrooms'])
-df_train['sqft_room'] = df_train['sqft_room'].map(lambda x: x if np.isfinite(x) else 0)
-df_test['sqft_room'] = np.round(df_test['sqft_living']/df_test['totalrooms'])
-df_test['sqft_room'] = df_test['sqft_room'].map(lambda x: x if np.isfinite(x) else 0)
+# 층 별 주거공간
+df_train['sqft_living_floor'] = df_train['sqft_above'] / df_train['floors']
+df_test['sqft_living_floor'] = df_test['sqft_above'] / df_test['floors']
 
-# 주거 공간 활용 비율
-df_train['living_ratio'] = df_train['sqft_living']/df_train['sqft_lot']
-df_train['living_ratio'] = df_train['living_ratio'].map(lambda x: np.log1p(x))
-df_test['living_ratio'] = df_test['sqft_living']/df_test['sqft_lot']
-df_test['living_ratio'] = df_test['living_ratio'].map(lambda x: np.log1p(x))
+# 부지 대비 건물 면적 비
+df_train['sqft_building_ratio'] = df_train['sqft_living_floor'] / df_train['sqft_lot']
+df_test['sqft_building_ratio'] = df_test['sqft_living_floor'] / df_test['sqft_lot']
 
-# 집의 외형적 평가
-df_train['grade_look'] = (df_train['view']+1)*df_train['condition']
-df_test['grade_look'] = (df_test['view']+1)*df_test['condition']
+# 평균 대비 주거 공간 오차
+df_train['living15_diff'] = df_train['sqft_living'] - df_train['sqft_living15']
+df_test['living15_diff'] = df_test['sqft_living'] - df_test['sqft_living15']
 
-# One-hot encoding
-df_train = pd.get_dummies(df_train, columns=['waterfront'], prefix='waterfront')
-#df_train = pd.get_dummies(df_train, columns=['view'], prefix='view')
-df_test = pd.get_dummies(df_test, columns=['waterfront'], prefix='waterfront')
-#df_test = pd.get_dummies(df_test, columns=['view'], prefix='view')
+# 평균 대비 부지 오차
+df_train['lot15_diff'] = df_train['sqft_lot'] - df_train['sqft_lot15']
+df_test['lot15_diff'] = df_test['sqft_lot'] - df_test['sqft_lot15']
 
+# 위도 단순화
+def category_lat(x):
+    if x < 47.2:
+        return 0    
+    elif x < 47.3:
+        return 1
+    elif x < 47.4:
+        return 2
+    elif x < 47.5:
+        return 3
+    elif x < 47.6:
+        return 4
+    elif x < 47.7:
+        return 5
+    else:
+        return 6
+    
+df_train['lat_cat'] = df_train['lat'].apply(category_lat)
+df_test['lat_cat'] = df_test['lat'].apply(category_lat)
+
+# 경도 단순화
+def category_long(x):
+    if x < -122.5:
+        return 0    
+    elif x < -122.4:
+        return 1
+    elif x < -122.3:
+        return 2
+    elif x < -122.2:
+        return 3
+    elif x < -122.1:
+        return 4
+    else:
+        return 5
+    
+df_train['long_cat'] = df_train['long'].apply(category_long)
+df_test['long_cat'] = df_test['long'].apply(category_long)
+
+# 등급 단순화
+def category_grade(x):
+    if x < 4:
+        return 1
+    elif x < 7:
+        return 2
+    elif x < 9:
+        return 3
+    elif x < 11:
+        return 4    
+    else:
+        return 5
+    
+df_train['grade_cat'] = df_train['grade'].apply(category_grade)
+df_test['grade_cat'] = df_test['grade'].apply(category_grade)
+
+# 외관 점수 (cat)
+df_train['out_score_cat'] = (df_train['view']+1) * df_train['grade_cat']
+df_test['out_score_cat'] = (df_test['view']+1) * df_test['grade_cat']
+
+# 내관 점수 (cat)
+df_train['in_score_cat'] = df_train['condition'] * df_train['grade_cat']
+df_test['in_score_cat'] = df_test['condition'] * df_test['grade_cat']
+
+# 총괄 점수 (cat)
+df_train['total_score_cat'] = df_train['out_score_cat'] + df_train['in_score_cat']
+df_test['total_score_cat'] = df_test['out_score_cat'] + df_test['in_score_cat']
+
+# 방 점수 (cat)
+df_train['totalrooms_score_cat'] = df_train['totalrooms'] * df_train['grade_cat']
+df_test['totalrooms_score_cat'] = df_test['totalrooms'] * df_test['grade_cat']
+
+# 정규화
+skew_columns = ['sqft_living','sqft_lot', 'sqft_above', 'sqft_basement', 'sqft_living15', 'sqft_lot15']
+for col in skew_columns:
+    df_train[col] = df_train[col].map(lambda x: np.log1p(x))
+    df_test[col] = df_test[col].map(lambda x: np.log1p(x))
+    
+# 가격 정규화 (np.log1p)
+df_train['price'] = df_train['price'].map(lambda x: np.log1p(x))
+        
 # Drop features
-df_train.drop(['yr_renovated'], axis=1, inplace=True)
-df_test.drop(['yr_renovated'], axis=1, inplace=True)
+df_train.drop(['grade_cat'], axis=1, inplace=True)
+df_test.drop(['grade_cat'], axis=1, inplace=True)    
 
 # 값 나누기
 Y_train = df_train['price']
+Y_check = np.expm1(Y_train)
 df_train.drop('price', axis=1, inplace=True)
 X_train = df_train
 X_test = df_test
@@ -101,37 +179,42 @@ X_test = df_test
 n_folds = 5
 kf = KFold(n_splits=n_folds, shuffle=True, random_state=42)
 
-def cv_score(model):
-    print("Model CV score : {:.4f}".format(np.mean(cross_val_score(model, X_train, Y_train)), 
-                                         kf=kfold))
-
-def rmsle_cv(model):
+def rmse_cv(model):
     rmse = np.sqrt(-cross_val_score(model, X_train, Y_train, scoring="neg_mean_squared_error", cv=kf))
     return rmse
     
-def rmsle(y, y_pred):
+def rmse(y, y_pred):
     return np.sqrt(mean_squared_error(y, y_pred))
-
-class AveragingModels(BaseEstimator, RegressorMixin, TransformerMixin):
-    def __init__(self, models):
-        self.models = models
-        
-    def fit(self, X, y):
-        self.models_ = [clone(x) for x in self.models]
-        
-        for model in self.models_:
-            model.fit(X, y)
-        return self
     
-    def predict(self, X):
-        predictions = np.column_stack([model.predict(X) for model in self.models_])
-        return np.mean(predictions, axis=1)
+# 모델 생성
+gboost = GradientBoostingRegressor(n_estimators=5000, learning_rate=0.05, max_depth=4, max_features="sqrt", min_samples_leaf=15, min_samples_split=10, loss="huber", random_state=64)
+model_xgb = xgb.XGBRegressor(n_estimators=2500, learning_rate=0.05, max_depth=4, objective="reg:linear", eval_metric='rmse', colsample_bytree=0.8, gamma=0.05, min_child_weight=1.8, reg_alpha=0.5, subsample=0.8, silent=1, random_state=64, nthread=-1)
+model_lgb = lgb.LGBMRegressor(n_estimators=3000, learning_rate=0.015, max_depth=4, objective="regression", num_leaves=31, min_data_in_leaf=30, min_child_samples=20, boosting="gbdt", feature_fraction=0.9, bagging_freq=1, bagging_fraction=0.9, bagging_seed=11, metric='rmse', lambda_l1=0.1, nthread=4, random_state=64)
 
-ridge = make_pipeline(RobustScaler(), RidgeCV(alphas=[5.5, 5.6, 5.7, 5.8, 5.9, 6.0, 6.1, 6.2, 6.3, 6.4, 6.5], cv=kf))
-ENet = make_pipeline(RobustScaler(), ElasticNetCV(alphas=[0.0002, 0.0003, 0.0004, 0.0005], l1_ratio=[0.8, 0.85, 0.9, 0.95, 0.99, 1], cv=kf, random_state=42))
-gboost = GradientBoostingRegressor(n_estimators=3000, learning_rate=0.05, max_depth=4, max_features="sqrt", min_samples_leaf=15, min_samples_split=10, loss="huber", random_state=42)
-model_xgb = xgb.XGBRegressor(random_state=42)
-model_lgb = lgb.LGBMRegressor(n_estimators=5000, learning_rate=0.01, max_depth=4, objective='regression', num_leaves=31, min_data_in_leaf=30, min_child_samples=20, boosting="gbdt", feature_fraction=0.9, bagging_freq=1, bagging_fraction=0.9, bagging_seed=11, metric='rmse', lambda_l1=0.1, nthread=4, random_state=4950)
-averaged_models = AveragingModels(models = (gboost, model_lgb))
+## 모델 학습
+# GradientBoosting
+gboost.fit(X_train, Y_train)
+gboost_train_pred = np.expm1(gboost.predict(X_train))
+gboost_pred = np.expm1(gboost.predict(X_test))
+print("RMSE(GradientBoosting): {:.6f}".format(rmse(Y_check, gboost_train_pred)))
 
-score = rmsle_cv(model_xgb)
+# xgboost
+model_xgb.fit(X_train, Y_train)
+xgb_train_pred = np.expm1(model_xgb.predict(X_train))
+xgb_pred = np.expm1(model_xgb.predict(X_test))
+print("RMSE(XGB):              {:.6f}".format(rmse(Y_check, xgb_train_pred)))
+
+# lightGBM
+model_lgb.fit(X_train, Y_train)
+lgb_train_pred = np.expm1(model_lgb.predict(X_train))
+lgb_pred = np.expm1(model_lgb.predict(X_test))
+print("RMSE(LightGBM):         {:.6f}".format(rmse(Y_check, lgb_train_pred)))
+
+# 데이터 조합 (앙상블)
+ensemble_train_pred = gboost_train_pred * 0.7 + xgb_train_pred * 0.1 + lgb_train_pred * 0.2
+ensemble_pred = gboost_pred * 0.7 + xgb_pred * 0.1 + lgb_pred * 0.2
+print("RMSE(EnsembleModel):    {:.6f}".format(rmse(Y_check, ensemble_train_pred)))
+
+submission = pd.read_csv('./Input/sample_submission.csv')
+submission['price'] = ensemble_pred
+submission.to_csv('./Output/submission_ensemble.csv', index=False)
